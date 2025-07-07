@@ -103,75 +103,118 @@ def reconhecer_captcha_audio(driver, audio_button_xpath=None, audio_tag="audio",
     # Clique na imagem para gerar o áudio do captcha
     audio_img = driver.find_element(By.ID, "infraImgAudioCaptcha")
     audio_img.click()
-    # Aguarde até que o src do <source> seja preenchido
+    
+    # Aguarde até que o elemento de áudio esteja presente
     WebDriverWait(driver, 10).until(
-        lambda d: d.find_element(By.ID, "infraSrcAudioCaptcha").get_attribute("src")
+        lambda d: d.find_element(By.TAG_NAME, "audio") and d.find_element(By.TAG_NAME, "audio").find_element(By.TAG_NAME, "source")
     )
-    sleep(1)  # Pequeno delay extra para garantir
-    audio_source_elem = driver.find_element(By.ID, "infraSrcAudioCaptcha")
-    audio_src = audio_source_elem.get_attribute("src")
-    print(f"URL do áudio capturada: {audio_src}")
-    if not audio_src or not audio_src.strip():
-        raise Exception("O atributo src do áudio está vazio. O áudio ainda não foi gerado ou houve erro no carregamento.")
+    sleep(1)  # Pequeno delay extra para garantir que o áudio foi carregado
 
-    # Se a URL for relativa, torne-a absoluta
-    if audio_src.startswith("/"):
-        from urllib.parse import urljoin
-        audio_src = urljoin(driver.current_url, audio_src)
+    # Script JavaScript para baixar o áudio
+    download_script = """
+    const audioSrc = new URL(document.querySelector('audio source').src, window.location.origin).href;
+    return audioSrc;
+    """
+    audio_url = driver.execute_script(download_script)
+    print(f"URL do áudio capturada: {audio_url}")
+
+    if not audio_url or not audio_url.strip():
+        raise Exception("O URL do áudio está vazio. O áudio ainda não foi gerado ou houve erro no carregamento.")
 
     # Baixe o áudio usando os cookies do Selenium
-    import requests
     session = requests.Session()
     for cookie in driver.get_cookies():
         session.cookies.set(cookie['name'], cookie['value'])
-    response = session.get(audio_src)
+    
+    response = session.get(audio_url)
     print("Content-Type:", response.headers.get("Content-Type"))
     audio_content = response.content
 
-    # Salve como WAV diretamente
-    with open("captcha.wav", "wb") as audio_file:
+    # Salve como WAV
+    wav_path = "captcha.wav"
+    with open(wav_path, "wb") as audio_file:
         audio_file.write(audio_content)
 
     # Verifique se o arquivo foi salvo corretamente e tem tamanho > 0
-    if not os.path.exists("captcha.wav") or os.path.getsize("captcha.wav") == 0:
-        print("Arquivo captcha.wav não foi salvo corretamente ou está vazio.")
+    if not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
+        print("Arquivo de áudio não foi salvo corretamente ou está vazio.")
         with open("captcha_download_error.html", "wb") as f:
             f.write(audio_content)
         return
 
     # Tente abrir o arquivo com pydub para garantir que é um WAV válido
     try:
-        audio_segment = AudioSegment.from_wav("captcha.wav")
-        print(f"Duração do áudio: {audio_segment.duration_seconds:.2f} segundos")
+        # Carrega e normaliza o áudio
+        audio_segment = AudioSegment.from_wav(wav_path)
+        print(f"Duração do áudio original: {audio_segment.duration_seconds:.2f} segundos")
+        
+        # Normaliza o volume do áudio
+        normalized_audio = audio_segment.normalize(headroom=0.1)
+        
+        # Remove ruído de fundo (aumenta um pouco o volume)
+        normalized_audio = normalized_audio + 10
+        
+        # Salva o áudio processado
+        normalized_audio.export("captcha_processed.wav", format="wav")
+        print("Áudio normalizado e processado salvo.")
+        
     except Exception as e:
-        print(f"Erro ao abrir captcha.wav com pydub: {e}")
+        print(f"Erro ao processar áudio com pydub: {e}")
         with open("captcha_download_error.html", "wb") as f:
             f.write(audio_content)
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
         return
 
     # Realizar o reconhecimento de fala
     recognizer = sr.Recognizer()
+    
+    # Configurações do reconhecedor
+    recognizer.energy_threshold = 300  # Aumenta sensibilidade
+    recognizer.dynamic_energy_threshold = True
+    recognizer.pause_threshold = 0.8  # Reduz pausa entre palavras
+    recognizer.operation_timeout = 30  # Aumenta timeout
+
+    text = ""
     try:
-        with sr.AudioFile("captcha.wav") as source:
+        # Primeira tentativa com áudio original
+        with sr.AudioFile(wav_path) as source:
+            print("Tentando reconhecimento com áudio original...")
             audio = recognizer.record(source)
-        # Tenta transcrever usando o reconhecimento do Google
-        text = recognizer.recognize_google(audio, language="pt-BR")
-        print("Texto reconhecido:", text)
+            text = recognizer.recognize_google(audio, language="pt-BR")
+            print("Texto reconhecido (áudio original):", text)
     except Exception as e:
-        print("Erro ao reconhecer o áudio:", e)
-        with open("captcha_download_error.html", "wb") as f:
-            f.write(audio_content)
-        text = ""
+        print(f"Erro no primeiro reconhecimento: {e}")
+        try:
+            # Segunda tentativa com áudio processado
+            with sr.AudioFile("captcha_processed.wav") as source:
+                print("Tentando reconhecimento com áudio processado...")
+                audio = recognizer.record(source)
+                text = recognizer.recognize_google(audio, language="pt-BR")
+                print("Texto reconhecido (áudio processado):", text)
+        except Exception as e:
+            print(f"Erro no segundo reconhecimento: {e}")
+            if not isinstance(e, sr.UnknownValueError):
+                with open("captcha_download_error.html", "wb") as f:
+                    f.write(audio_content)
 
     # Insere o texto reconhecido no campo do captcha
-    captcha_field = driver.find_element(By.ID, captcha_input_id)
-    captcha_field.send_keys(text)
+    if text:
+        text = ''.join(c for c in text if c.isalnum())  # Remove caracteres especiais
+        print(f"Texto final limpo: {text}")
+        captcha_field = driver.find_element(By.ID, captcha_input_id)
+        captcha_field.clear()  # Limpa o campo antes de inserir
+        captcha_field.send_keys(text)
 
-    # (Opcional) Enviar o formulário ou continuar o fluxo
-    if submit_id:
-        submit_button = driver.find_element(By.ID, submit_id)
-        submit_button.click()
+        # (Opcional) Enviar o formulário ou continuar o fluxo
+        if submit_id:
+            submit_button = driver.find_element(By.ID, submit_id)
+            submit_button.click()
 
     # Limpeza dos arquivos
-    if os.path.exists("captcha.wav"):
-        os.remove("captcha.wav")
+    if os.path.exists(wav_path):
+        os.remove(wav_path)
+    if os.path.exists("captcha_processed.wav"):
+        os.remove("captcha_processed.wav")
+    
+    return text
