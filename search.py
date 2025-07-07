@@ -14,24 +14,25 @@ import os
 
 # Bibliotecas Externas
 from captcha_view import reconhecer_captcha
+from utils import ler_planilha_para_dict, normalize_name
 
 
 
-def query():
+def query(nome_n, cpf_n, tel_n, email_n,rg_n="50.070.805-8", org_exp="SSPMG", end_n="Rod. Papa João Paulo II, 4001", bairro_n="Serra Verde", est_n="MG", cep_n="31630-901", cidade_n="Belo Horizonte", senha_n="12345678"):
 
 
-    NOME = "TESTE NOME"
-    CPF = "38719801610"
-    RG="50.070.805-8"
-    EXPED="SSPMG"
-    END="Rod. Papa João Paulo II, 4001"
-    BAIRRO="Serra Verde"
-    ESTADO="MG"
-    CEP="31630-901"
-    CIDADE="Belo Horizonte"
-    TEL = "37999445587"
-    EMAIL="exemplo@gmail.com"
-    SENHA_PADRAO="12345678"
+    NOME = nome_n
+    CPF = cpf_n
+    RG=rg_n
+    EXPED=org_exp
+    END=end_n
+    BAIRRO=bairro_n
+    ESTADO=est_n
+    CEP=cep_n
+    CIDADE=cidade_n
+    TEL = tel_n
+    EMAIL=email_n
+    SENHA_PADRAO=senha_n
 
     try:
 
@@ -112,6 +113,9 @@ def query():
         audio_content = requests.get(audio_source).content
         with open("captcha.mp3", "wb") as audio_file:
             audio_file.write(audio_content)
+            
+            
+        # navegador.find_element(By.ID, "sbmEnviar").click()
         
 
     except Exception as e:
@@ -120,4 +124,21 @@ def query():
 
 
 if __name__ == "__main__":
-    query()
+    # Faz a leitura dos dados da planilha de militares
+    caminho = "dados.xlsx"
+    dados = ler_planilha_para_dict(caminho)
+    
+    # Faz a iteração sobre os dados da planilha
+    for i in dados:
+        print("*******************************")
+        print(i["CANDIDATO"])
+        print(i["CPF"])
+        print(i["CONTATO"])
+        print(i["CELULAR"])
+        print(i["EMAIL"])
+        # Normaliza para tamanho normal
+        candidato = normalize_name(i["CANDIDATO"])
+    
+        query(candidato, i["CPF"], i["CELULAR"], i["EMAIL"]) 
+        
+        break

@@ -99,6 +99,42 @@ def reconhecer_captcha(driver):
     # Fechar navegador (quando finalizar tudo)
     # driver.quit()
 
+def converter_texto_captcha(texto):
+    # Dicionário de mapeamento de palavras para números
+    numero_map = {
+        'zero': '0', 'um': '1', 'dois': '2', 'três': '3', 'tres': '3',
+        'quatro': '4', 'cinco': '5', 'seis': '6', 'sete': '7',
+        'oito': '8', 'nove': '9', 'dez': '10',
+        # Variações comuns
+        'ver': 'V', 'v': 'V', 've': 'V',
+        'x': 'X', 'y': 'Y', 'z': 'Z',
+        'i': 'I', 'w': 'W', 'k': 'K'
+    }
+    
+    # Converte o texto para minúsculo para facilitar o processamento
+    palavras = texto.lower().split()
+    resultado = []
+    
+    for palavra in palavras:
+        # Se a palavra está no mapeamento, usa o valor mapeado
+        if palavra in numero_map:
+            resultado.append(numero_map[palavra])
+        # Se é um número por extenso não mapeado, tenta converter
+        elif palavra.isdigit():
+            resultado.append(palavra)
+        # Se é uma letra única, converte para maiúscula
+        elif len(palavra) == 1 and palavra.isalpha():
+            resultado.append(palavra.upper())
+        # Se não é número nem letra única, verifica cada caractere
+        else:
+            for char in palavra:
+                if char.isdigit():
+                    resultado.append(char)
+                elif char.isalpha():
+                    resultado.append(char.upper())
+    
+    return ''.join(resultado)
+
 def reconhecer_captcha_audio(driver, audio_button_xpath=None, audio_tag="audio", captcha_input_id="txtInfraCaptcha", submit_id=None):
     # Clique na imagem para gerar o áudio do captcha
     audio_img = driver.find_element(By.ID, "infraImgAudioCaptcha")
@@ -198,10 +234,10 @@ def reconhecer_captcha_audio(driver, audio_button_xpath=None, audio_tag="audio",
                 with open("captcha_download_error.html", "wb") as f:
                     f.write(audio_content)
 
-    # Insere o texto reconhecido no campo do captcha
+    # Processa o texto reconhecido
     if text:
-        text = ''.join(c for c in text if c.isalnum())  # Remove caracteres especiais
-        print(f"Texto final limpo: {text}")
+        text = converter_texto_captcha(text)
+        print(f"Texto convertido para formato do captcha: {text}")
         captcha_field = driver.find_element(By.ID, captcha_input_id)
         captcha_field.clear()  # Limpa o campo antes de inserir
         captcha_field.send_keys(text)
